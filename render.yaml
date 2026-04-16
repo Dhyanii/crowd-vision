@@ -1,0 +1,21 @@
+# render.yaml – Deploy CrowdVision to Render.com
+# https://render.com/docs/infrastructure-as-code
+
+services:
+  - type: web
+    name: crowdvision
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard          # upgrade to pro for GPU if needed
+    healthCheckPath: /health
+    envVars:
+      - key: YOLO_MODEL
+        value: yolov8n.pt   # swap to yolov8s.pt / yolov8m.pt for higher accuracy
+      - key: YOLO_CONF
+        value: "0.35"
+      - key: YOLO_DEVICE
+        value: cpu
+    disk:
+      name: outputs
+      mountPath: /app/outputs
+      sizeGB: 5

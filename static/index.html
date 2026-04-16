@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CrowdVision — Human Density Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ── Design System ────────────────────────── */
+:root {
+  --bg:        #05070d;
+  --surface:   #0c1018;
+  --surface2:  #131825;
+  --border:    #1e2a3a;
+  --accent:    #00ff88;
+  --accent2:   #00b8ff;
+  --warn:      #ff6b35;
+  --text:      #e2eaf5;
+  --muted:     #5a7090;
+  --mono:      'Space Mono', monospace;
+  --sans:      'Syne', sans-serif;
+  --radius:    6px;
+  --glow:      0 0 20px rgba(0,255,136,.25);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Grid noise overlay ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Scan-line effect ── */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,.07) 2px,
+    rgba(0,0,0,.07) 4px
+  );
+  pointer-events: none; z-index: 0;
+}
+
+/* ── Header ─────────────────────────────── */
+header {
+  position: relative; z-index: 10;
+  padding: 2rem 2.5rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 1.2rem;
+}
+
+.logo-mark {
+  width: 42px; height: 42px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  box-shadow: var(--glow);
+  animation: pulse 3s ease-in-out infinite;
+}
+
+.logo-mark svg { width: 20px; height: 20px; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(0,255,136,.2); }
+  50%       { box-shadow: 0 0 30px rgba(0,255,136,.5); }
+}
+
+.brand h1 {
+  font-size: 1.4rem; font-weight: 800; letter-spacing: .06em;
+  color: var(--accent); line-height: 1;
+}
+.brand p { font-family: var(--mono); font-size: .65rem; color: var(--muted); margin-top: .3rem; letter-spacing: .1em; }
+
+.status-pill {
+  margin-left: auto;
+  font-family: var(--mono); font-size: .65rem; letter-spacing: .08em;
+  padding: .3rem .8rem; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--muted);
+  transition: all .4s;
+}
+.status-pill.ready { border-color: var(--accent); color: var(--accent); box-shadow: var(--glow); }
+.status-pill.busy  { border-color: var(--warn);   color: var(--warn); }
+
+/* ── Main layout ─────────────────────────── */
+main {
+  position: relative; z-index: 1;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 4rem;
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+}
+
+/* ── Panel base ──────────────────────────── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.6rem;
+}
+
+.panel-label {
+  font-family: var(--mono); font-size: .6rem; letter-spacing: .15em;
+  color: var(--muted); text-transform: uppercase; margin-bottom: 1.2rem;
+  display: flex; align-items: center; gap: .5rem;
+}
+
+.panel-label::before {
+  content: '';
+  display: block; width: 12px; height: 2px;
+  background: var(--accent);
+}
+
+/* ── Upload zone ─────────────────────────── */
+.drop-zone {
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .25s, background .25s;
+  position: relative;
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(0,255,136,.04);
+}
+
+.drop-zone input[type=file] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer; width: 100%;
+}
+
+.drop-icon {
+  font-size: 2.2rem; margin-bottom: .6rem;
+  filter: grayscale(1); transition: filter .25s;
+}
+
+.drop-zone:hover .drop-icon { filter: none; }
+
+.drop-zone p { font-size: .82rem; color: var(--muted); }
+.drop-zone p span { color: var(--accent2); }
+
+.file-name {
+  margin-top: .8rem;
+  font-family: var(--mono); font-size: .7rem;
+  color: var(--accent); word-break: break-all;
+}
+
+/* ── Form controls ───────────────────────── */
+.field { margin: 1rem 0; }
+
+.field label {
+  display: block; font-size: .72rem; color: var(--muted);
+  font-family: var(--mono); margin-bottom: .4rem; letter-spacing: .05em;
+}
+
+.field input[type=number], .field select {
+  width: 100%;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .55rem .8rem;
+  color: var(--text); font-family: var(--mono); font-size: .82rem;
+  outline: none; transition: border-color .2s;
+}
+
+.field input[type=number]:focus, .field select:focus {
+  border-color: var(--accent2);
+}
+
+.hint { font-size: .62rem; color: var(--muted); margin-top: .3rem; font-family: var(--mono); }
+
+/* ── Preset chips ────────────────────────── */
+.presets { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+
+.chip {
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .05em;
+  padding: .3rem .65rem; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; transition: all .2s;
+}
+
+.chip:hover, .chip.active {
+  border-color: var(--accent2); color: var(--accent2);
+  background: rgba(0,184,255,.08);
+}
+
+/* ── Analyze button ──────────────────────── */
+#analyzeBtn {
+  width: 100%; margin-top: 1.4rem;
+  padding: .85rem;
+  background: var(--accent);
+  border: none; border-radius: var(--radius);
+  color: #000; font-family: var(--sans); font-size: .9rem; font-weight: 700;
+  letter-spacing: .08em; cursor: pointer;
+  transition: opacity .2s, transform .1s;
+}
+
+#analyzeBtn:hover:not(:disabled) { opacity: .9; }
+#analyzeBtn:active:not(:disabled) { transform: scale(.98); }
+#analyzeBtn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Progress ────────────────────────────── */
+.progress-wrap {
+  margin-top: 1rem; display: none;
+}
+.progress-wrap.show { display: block; }
+
+.progress-bar-outer {
+  height: 3px; background: var(--border); border-radius: 2px; overflow: hidden;
+}
+
+.progress-bar-inner {
+  height: 100%; background: var(--accent);
+  width: 0%; transition: width .3s ease;
+  animation: shimmer 1.5s linear infinite;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent2) 50%, var(--accent) 100%);
+  background-size: 200% 100%;
+}
+
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.progress-label {
+  font-family: var(--mono); font-size: .62rem; color: var(--muted);
+  margin-top: .4rem; text-align: right;
+}
+
+/* ── Results panel ───────────────────────── */
+#results { display: none; }
+#results.show { display: block; }
+
+/* ── Stat grid ───────────────────────────── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: .8rem; margin-bottom: 1.4rem;
+}
+
+.stat-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.stat-card .value {
+  font-size: 2rem; font-weight: 800; line-height: 1;
+  color: var(--accent);
+}
+
+.stat-card .value.blue { color: var(--accent2); }
+.stat-card .value.orange { color: var(--warn); }
+
+.stat-card .label {
+  font-family: var(--mono); font-size: .6rem; color: var(--muted);
+  margin-top: .4rem; letter-spacing: .07em;
+}
+
+/* ── Image preview ───────────────────────── */
+.preview-wrap {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; margin-bottom: 1.2rem;
+  background: var(--surface2);
+}
+
+.preview-wrap img {
+  width: 100%; display: block; max-height: 480px;
+  object-fit: contain;
+}
+
+/* ── Download bar ────────────────────────── */
+.download-bar {
+  display: flex; gap: .8rem; margin-bottom: 1.4rem; flex-wrap: wrap;
+}
+
+.dl-btn {
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .06em;
+  padding: .5rem 1rem; border-radius: var(--radius);
+  border: 1px solid var(--border); color: var(--text);
+  text-decoration: none; transition: all .2s;
+  display: flex; align-items: center; gap: .4rem;
+}
+
+.dl-btn:hover {
+  border-color: var(--accent); color: var(--accent);
+  background: rgba(0,255,136,.06);
+}
+
+/* ── Chart ───────────────────────────────── */
+.chart-wrap {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.2rem; margin-bottom: 1.2rem;
+}
+
+.chart-title {
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .1em;
+  color: var(--muted); margin-bottom: 1rem;
+}
+
+/* ── Error ───────────────────────────────── */
+.error-box {
+  background: rgba(255,107,53,.1); border: 1px solid var(--warn);
+  border-radius: var(--radius); padding: 1rem 1.2rem;
+  font-family: var(--mono); font-size: .75rem; color: var(--warn);
+  margin-top: 1rem; display: none;
+}
+
+.error-box.show { display: block; }
+
+/* ── Empty state ──────────────────────────── */
+.empty-state {
+  min-height: 300px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--muted); text-align: center; gap: .8rem;
+}
+
+.empty-state .icon { font-size: 3rem; opacity: .3; }
+.empty-state p { font-size: .8rem; font-family: var(--mono); }
+
+/* ── Video player ────────────────────────── */
+video.preview {
+  width: 100%; max-height: 420px; display: block;
+  border-radius: var(--radius);
+  outline: none;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────── -->
+<header>
+  <div class="logo-mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="1.8">
+      <circle cx="12" cy="7" r="4"/>
+      <path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>
+      <circle cx="12" cy="12" r="10" stroke-dasharray="3 3" opacity=".4"/>
+    </svg>
+  </div>
+  <div class="brand">
+    <h1>CROWDVISION</h1>
+    <p>HUMAN DENSITY ANALYSIS SYSTEM</p>
+  </div>
+  <span class="status-pill" id="statusPill">LOADING MODEL…</span>
+</header>
+
+<!-- ── Main ───────────────────────────── -->
+<main>
+
+  <!-- ── Left: Controls ──────────────── -->
+  <aside>
+    <div class="panel">
+      <div class="panel-label">Upload &amp; Configure</div>
+
+      <!-- drop zone -->
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept="image/*,video/*">
+        <div class="drop-icon">📡</div>
+        <p>Drop image or video here<br><span>or click to browse</span></p>
+        <div class="file-name" id="fileName"></div>
+      </div>
+
+      <!-- area input -->
+      <div class="field">
+        <label>AREA COVERED (sq km)</label>
+        <input type="number" id="areaInput" value="0.1" step="0.01" min="0.001">
+        <div class="hint">Ground area visible in each frame/image</div>
+      </div>
+
+      <!-- quick presets -->
+      <div class="field">
+        <label>QUICK PRESETS</label>
+        <div class="presets">
+          <div class="chip" data-area="0.01">Street block</div>
+          <div class="chip active" data-area="0.1">City plaza</div>
+          <div class="chip" data-area="0.5">Park</div>
+          <div class="chip" data-area="1.0">Neighborhood</div>
+          <div class="chip" data-area="5.0">District</div>
+        </div>
+      </div>
+
+      <!-- frame skip (videos) -->
+      <div class="field" id="frameSkipField" style="display:none">
+        <label>FRAME SKIP</label>
+        <input type="number" id="frameSkip" value="5" min="1" max="30">
+        <div class="hint">Process every N-th frame (higher = faster, less accurate)</div>
+      </div>
+
+      <!-- analyze -->
+      <button id="analyzeBtn" disabled>SELECT A FILE FIRST</button>
+
+      <!-- progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
+        <div class="progress-label" id="progressLabel">Uploading…</div>
+      </div>
+
+      <!-- error -->
+      <div class="error-box" id="errorBox"></div>
+    </div>
+  </aside>
+
+  <!-- ── Right: Results ──────────────── -->
+  <section>
+    <div class="panel" style="min-height: 400px;">
+      <div class="panel-label">Analysis Output</div>
+
+      <!-- empty placeholder -->
+      <div class="empty-state" id="emptyState">
+        <div class="icon">🛰️</div>
+        <p>Upload an image or video to begin analysis</p>
+      </div>
+
+      <!-- results (hidden until analysis completes) -->
+      <div id="results">
+
+        <!-- ── Stats ── -->
+        <div class="stat-grid" id="statGrid"></div>
+
+        <!-- ── Download links ── -->
+        <div class="download-bar" id="downloadBar"></div>
+
+        <!-- ── Image preview ── -->
+        <div id="imagePreview"></div>
+
+        <!-- ── Chart (video) ── -->
+        <div class="chart-wrap" id="chartWrap" style="display:none">
+          <div class="chart-title">PEOPLE COUNT OVER TIME</div>
+          <canvas id="timeChart" height="180"></canvas>
+        </div>
+
+        <!-- ── Video preview ── -->
+        <div id="videoPreview"></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<!-- ──────────────────────────────────────────
+  JavaScript
+───────────────────────────────────────────── -->
+<script>
+/* ── State ─────────────────────────────── */
+let selectedFile = null;
+let chartInstance = null;
+const API_BASE = "";   // same-origin; update for external deployment
+
+/* ── DOM refs ──────────────────────────── */
+const fileInput      = document.getElementById("fileInput");
+const dropZone       = document.getElementById("dropZone");
+const fileNameEl     = document.getElementById("fileName");
+const areaInput      = document.getElementById("areaInput");
+const frameSkipField = document.getElementById("frameSkipField");
+const frameSkipInput = document.getElementById("frameSkip");
+const analyzeBtn     = document.getElementById("analyzeBtn");
+const progressWrap   = document.getElementById("progressWrap");
+const progressBar    = document.getElementById("progressBar");
+const progressLabel  = document.getElementById("progressLabel");
+const errorBox       = document.getElementById("errorBox");
+const emptyState     = document.getElementById("emptyState");
+const resultsEl      = document.getElementById("results");
+const statGrid       = document.getElementById("statGrid");
+const downloadBar    = document.getElementById("downloadBar");
+const imagePreview   = document.getElementById("imagePreview");
+const chartWrap      = document.getElementById("chartWrap");
+const videoPreview   = document.getElementById("videoPreview");
+const statusPill     = document.getElementById("statusPill");
+
+/* ── Health check ──────────────────────── */
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API_BASE}/health`);
+    if (r.ok) {
+      statusPill.textContent = "MODEL READY";
+      statusPill.classList.add("ready");
+    }
+  } catch {
+    statusPill.textContent = "API OFFLINE";
+  }
+}
+
+checkHealth();
+setInterval(checkHealth, 30_000);
+
+/* ── File selection ────────────────────── */
+function handleFile(f) {
+  if (!f) return;
+  selectedFile = f;
+  fileNameEl.textContent = f.name;
+  analyzeBtn.disabled = false;
+  analyzeBtn.textContent = "▶ ANALYZE";
+  hideError();
+  // Show frame-skip for video files
+  const isVideo = f.type.startsWith("video/");
+  frameSkipField.style.display = isVideo ? "block" : "none";
+}
+
+fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drag-over"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.classList.remove("drag-over");
+  handleFile(e.dataTransfer.files[0]);
+});
+
+/* ── Preset chips ──────────────────────── */
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+    chip.classList.add("active");
+    areaInput.value = chip.dataset.area;
+  });
+});
+
+/* ── Helpers ───────────────────────────── */
+function showError(msg) {
+  errorBox.textContent = `⚠ ${msg}`;
+  errorBox.classList.add("show");
+}
+function hideError() { errorBox.classList.remove("show"); }
+
+function setProgress(pct, label) {
+  progressBar.style.width = `${pct}%`;
+  progressLabel.textContent = label;
+}
+
+function statCard(value, label, colorClass = "") {
+  return `<div class="stat-card">
+    <div class="value ${colorClass}">${value}</div>
+    <div class="label">${label}</div>
+  </div>`;
+}
+
+/* ── Render results ────────────────────── */
+function renderImageResult(data) {
+  statGrid.innerHTML =
+    statCard(data.people_count, "PERSONS DETECTED") +
+    statCard(data.density_per_sq_km.toLocaleString(), "PEOPLE / SQ KM", "blue") +
+    statCard(data.area_sq_km + " km²", "AREA COVERED", "orange");
+
+  downloadBar.innerHTML = `
+    <a class="dl-btn" href="${data.annotated_image_url}" download>
+      ⬇ Download Annotated Image
+    </a>`;
+
+  imagePreview.innerHTML = `
+    <div class="preview-wrap">
+      <img src="${data.annotated_image_url}" alt="Annotated image" loading="lazy">
+    </div>`;
+
+  chartWrap.style.display = "none";
+  videoPreview.innerHTML = "";
+}
+
+function renderVideoResult(data) {
+  statGrid.innerHTML =
+    statCard(data.average_count, "AVG PERSONS / FRAME") +
+    statCard(data.peak_count, "PEAK COUNT", "orange") +
+    statCard(data.average_density_per_sq_km.toLocaleString(), "AVG DENSITY / SQ KM", "blue") +
+    statCard(data.peak_density_per_sq_km.toLocaleString(), "PEAK DENSITY / SQ KM", "orange") +
+    statCard(data.frames_processed, "FRAMES ANALYZED") +
+    statCard(data.peak_timestamp_sec + "s", "PEAK AT");
+
+  downloadBar.innerHTML = `
+    <a class="dl-btn" href="${data.annotated_video_url}" download>
+      ⬇ Download Annotated Video
+    </a>`;
+
+  imagePreview.innerHTML = "";
+
+  // ── Chart ──
+  chartWrap.style.display = "block";
+  if (chartInstance) chartInstance.destroy();
+
+  const ctx = document.getElementById("timeChart").getContext("2d");
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.timestamps.map(t => t + "s"),
+      datasets: [{
+        label: "Persons",
+        data: data.frame_counts,
+        borderColor: "#00ff88",
+        backgroundColor: "rgba(0,255,136,.08)",
+        borderWidth: 2,
+        pointRadius: data.frame_counts.length < 100 ? 3 : 0,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          ticks: { color: "#5a7090", font: { family: "Space Mono", size: 10 }, maxTicksLimit: 12 },
+          grid: { color: "rgba(255,255,255,.04)" }
+        },
+        y: {
+          ticks: { color: "#5a7090", font: { family: "Space Mono", size: 10 } },
+          grid: { color: "rgba(255,255,255,.04)" },
+          beginAtZero: true
+        }
+      }
+    }
+  });
+
+  // ── Video player ──
+  videoPreview.innerHTML = `
+    <div style="margin-top:1rem">
+      <video class="preview" controls preload="metadata">
+        <source src="${data.annotated_video_url}" type="video/mp4">
+      </video>
+    </div>`;
+}
+
+/* ── Analyze ───────────────────────────── */
+analyzeBtn.addEventListener("click", async () => {
+  if (!selectedFile) return;
+
+  const isVideo = selectedFile.type.startsWith("video/");
+  const area    = parseFloat(areaInput.value) || 0.1;
+  const skip    = parseInt(frameSkipInput.value) || 5;
+
+  hideError();
+  analyzeBtn.disabled = true;
+  analyzeBtn.textContent = "ANALYZING…";
+  progressWrap.classList.add("show");
+  setProgress(10, "Uploading file…");
+  statusPill.className = "status-pill busy";
+  statusPill.textContent = "PROCESSING";
+
+  const form = new FormData();
+  form.append("file", selectedFile);
+  form.append("area_sq_km", area);
+  if (isVideo) form.append("frame_skip", skip);
+
+  try {
+    setProgress(30, isVideo ? "Processing video frames…" : "Running YOLO detection…");
+
+    const endpoint = isVideo ? "/analyze/video" : "/analyze/image";
+    const res = await fetch(`${API_BASE}${endpoint}`, { method: "POST", body: form });
+
+    setProgress(90, "Rendering results…");
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+      throw new Error(err.detail || res.statusText);
+    }
+
+    const data = await res.json();
+    setProgress(100, "Done!");
+
+    // Show results
+    emptyState.style.display = "none";
+    resultsEl.classList.add("show");
+
+    if (isVideo) renderVideoResult(data);
+    else         renderImageResult(data);
+
+    statusPill.className = "status-pill ready";
+    statusPill.textContent = "MODEL READY";
+
+  } catch (err) {
+    showError(err.message);
+    statusPill.className = "status-pill";
+    statusPill.textContent = "ERROR";
+  } finally {
+    progressWrap.classList.remove("show");
+    analyzeBtn.disabled = false;
+    analyzeBtn.textContent = "▶ ANALYZE";
+  }
+});
+</script>
+</body>
+</html>
